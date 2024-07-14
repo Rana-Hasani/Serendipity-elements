@@ -41,8 +41,7 @@ function poisson_lagrange_9node_Lshape()
     U = K \ F;
 
     % Plot the solution
-    plot_solution_Lshape(nodes, elements, U);
-end
+    plot_solution_Lshape(nodes, elements, U);end
 
 Serendipity Elements
 
