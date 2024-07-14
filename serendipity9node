@@ -1,0 +1,166 @@
+function poisson_serendipity()
+    % Define geometry
+    L = 2;  % Size of the domain
+    Nx = 10;  % Number of elements in x direction
+    Ny = 10;  % Number of elements in y direction
+    [nodes, elements] = generate_mesh(L, Nx, Ny);
+
+    % Define serendipity shape functions and their gradients
+    [shape_functions, shape_gradients] = define_serendipity_elements();
+
+    % Assemble global stiffness matrix and force vector
+    [K, F] = assemble_system(nodes, elements, shape_functions, shape_gradients);
+
+    % Apply boundary conditions
+    [K, F] = apply_boundary_conditions(K, F, nodes);
+
+    % Solve the linear system
+    U = K \ F;
+
+    % Plot the solution
+    plot_solution(nodes, elements, U);
+
+    % Evaluate accuracy
+    accuracy = evaluate_accuracy(nodes, U);
+    fprintf('Accuracy: %.2f%%\n', accuracy);
+end
+
+function [nodes, elements] = generate_mesh(L, Nx, Ny)
+    % Generate a simple structured mesh for the domain
+    [x, y] = meshgrid(linspace(0, L, Nx+1), linspace(0, L, Ny+1));
+    nodes = [x(:), y(:)];
+
+    elements = [];
+    for i = 1:Nx
+        for j = 1:Ny
+            n1 = (i-1)*(Ny+1) + j;
+            n2 = n1 + 1;
+            n3 = n2 + Ny + 1;
+            n4 = n1 + Ny + 1;
+            elements = [elements; n1, n2, n3, n4];
+        end
+    end
+end
+
+function [shape_functions, shape_gradients] = define_serendipity_elements()
+    syms xi eta;
+    shape_functions = [
+        (1-xi)*(1-eta)*(1+xi+eta)/4; % Shape functions for serendipity element
+        (1+xi)*(1-eta)*(1-xi+eta)/4;
+        (1+xi)*(1+eta)*(1-xi-eta)/4;
+        (1-xi)*(1+eta)*(1+xi-eta)/4;
+    ];
+    shape_gradients = [
+        diff(shape_functions, xi)';
+        diff(shape_functions, eta)'
+    ];
+end
+
+function [K, F] = assemble_system(nodes, elements, shape_functions, shape_gradients)
+    num_nodes = size(nodes, 1);
+    num_elements = size(elements, 1);
+    K = sparse(num_nodes, num_nodes);
+    F = zeros(num_nodes, 1);
+
+    for e = 1:num_elements
+        element_nodes = elements(e, :);
+        coords = nodes(element_nodes, :);
+
+        % Compute element stiffness matrix and force vector
+        [Ke, Fe] = element_stiffness_force(coords, shape_functions, shape_gradients);
+
+        % Assemble into global stiffness matrix and force vector
+        for i = 1:length(element_nodes)
+            for j = 1:length(element_nodes)
+                K(element_nodes(i), element_nodes(j)) = K(element_nodes(i), element_nodes(j)) + Ke(i, j);
+            end
+            F(element_nodes(i)) = F(element_nodes(i)) + Fe(i);
+        end
+    end
+end
+
+function [Ke, Fe] = element_stiffness_force(coords, shape_functions, shape_gradients)
+    % Numerical integration (Gauss quadrature)
+    gauss_points = [-1/sqrt(3), 1/sqrt(3)];
+    gauss_weights = [1, 1];
+    Ke = zeros(4, 4);
+    Fe = zeros(4, 1);
+
+    for i = 1:length(gauss_points)
+        for j = 1:length(gauss_points)
+            xi = gauss_points(i);
+            eta = gauss_points(j);
+            weight = gauss_weights(i) * gauss_weights(j);
+
+            % Evaluate shape functions and gradients at Gauss points
+            N = double(subs(shape_functions, {'xi', 'eta'}, {xi, eta}));
+            dN_dxi = double(subs(shape_gradients(1, :), {'xi', 'eta'}, {xi, eta}));
+            dN_deta = double(subs(shape_gradients(2, :), {'xi', 'eta'}, {xi, eta}));
+
+            % Jacobian matrix and determinant
+            J = [dN_dxi; dN_deta] * coords;
+            detJ = det(J);
+            invJ = inv(J);
+
+            % Gradient of shape functions in physical coordinates
+            dN_dx = invJ * [dN_dxi; dN_deta];
+
+            % Element stiffness matrix
+            Ke = Ke + (dN_dx' * dN_dx) * detJ * weight;
+
+            % Element force vector
+            Fe = Fe + N * detJ * weight;
+        end
+    end
+end
+
+function [K, F] = apply_boundary_conditions(K, F, nodes)
+    tol = 1e-5;
+    boundary_nodes = find(nodes(:, 1) < tol | nodes(:, 1) > 2-tol | nodes(:, 2) < tol | nodes(:, 2) > 2-tol);
+    for i = 1:length(boundary_nodes)
+        node = boundary_nodes(i);
+        K(node, :) = 0;
+        K(node, node) = 1;
+        F(node) = 0;
+    end
+end
+
+function plot_solution(nodes, elements, U)
+    % Create a grid of the solution
+    L = 2;  % Size of the domain
+    Nx = 100;  % Number of elements in x direction
+    Ny = 100;  % Number of elements in y direction
+    x = linspace(0, L, Nx+1);
+    y = linspace(0, L, Ny+1);
+    [X, Y] = meshgrid(x, y);
+    Z = griddata(nodes(:, 1), nodes(:, 2), U, X, Y);
+
+    % Plot the solution
+    surf(X, Y, Z);
+    title('Solution of the Poisson equation using serendipity elements');
+    xlabel('x');
+    ylabel('y');
+    zlabel('u');
+    view(2);  % View from the top
+    colorbar;
+end
+
+function accuracy = evaluate_accuracy(nodes, U)
+    % Define the analytical solution
+    analytical_solution = @(x, y) sin(pi*x/2) .* sin(pi*y/2);
+
+    % Compute the numerical solution at the node points
+    U_analytical = analytical_solution(nodes(:, 1), nodes(:, 2));
+
+    % Compute the error
+    error = U_analytical - U;
+
+    % Compute the L2 norm of the error
+    error_norm = norm(error);
+
+    % Compute the L2 norm of the analytical solution
+    analytical_norm = norm(U_analytical);
+
+    % Compute the accuracy as a percentage
+    accuracy = (1 - error_norm / analytical_norm) * 100;
+end
