@@ -1,6 +1,8 @@
 
-Serendipity vs. Lagrange Elements in Finite Element Method'
 
+![plot png](https://github.com/user-attachments/assets/eec72270-6cf7-482c-a02b-78e4c1fc0654)
+
+Serendipity vs. Lagrange Elements in Finite Element Method'
 
 Introduction
 
@@ -77,6 +79,7 @@ function poisson_lagrange_8node_circle()
 
     % Plot the solution
     plot_solution_circle(nodes, elements, U);end
+
 
 Comparison
 Node Count:
