@@ -1,0 +1,164 @@
+function poisson_serendipity_8node_circle1()
+    % Define geometry
+    R = 1;    % Radius of the domain
+    Nr = 10;  % Number of elements in the radial direction
+    Ntheta = 20;  % Number of elements in the angular direction
+    [nodes, elements] = generate_mesh_circle(R, Nr, Ntheta);
+
+    % Define serendipity shape functions and their gradients
+    [shape_functions, shape_gradients] = define_serendipity_elements();
+
+    % Assemble global stiffness matrix and force vector
+    [K, F] = assemble_system(nodes, elements, shape_functions, shape_gradients);
+
+    % Apply boundary conditions
+    [K, F] = apply_boundary_conditions_circle(K, F, nodes, R);
+
+    % Solve the linear system
+    U = K \ F;
+
+    % Plot the solution
+    plot_solution_circle(nodes, elements, U);
+end
+
+function [nodes, elements] = generate_mesh_circle(R, Nr, Ntheta)
+    % Generate nodes for a circular domain with 8-node serendipity elements
+    theta = linspace(0, 2*pi, Ntheta+1);
+    r = linspace(0, R, Nr+1);
+    
+    % Create the nodes
+    nodes = [];
+    for i = 1:length(r)
+        for j = 1:length(theta)
+            nodes = [nodes; r(i)*cos(theta(j)), r(i)*sin(theta(j))];
+        end
+    end
+
+    % Create the elements
+    elements = [];
+    for i = 1:Nr
+        for j = 1:Ntheta
+            n1 = (i-1)*(Ntheta+1) + j;
+            n2 = n1 + 1;
+            n3 = n2 + Ntheta + 1;
+            n4 = n1 + Ntheta + 1;
+            
+            n5 = (n1 + n2) / 2;
+            n6 = (n2 + n3) / 2;
+            n7 = (n3 + n4) / 2;
+            n8 = (n4 + n1) / 2;
+            
+            elements = [elements; n1, n2, n3, n4, n5, n6, n7, n8];
+        end
+    end
+
+    % Ensure elements are positive integers
+    elements = round(elements);
+end
+
+function [shape_functions, shape_gradients] = define_serendipity_elements()
+    syms xi eta;
+    shape_functions = [
+        0.25 * (1 - xi) * (1 - eta) * (-xi - eta - 1); % Shape function 1
+        0.25 * (1 + xi) * (1 - eta) * ( xi - eta - 1); % Shape function 2
+        0.25 * (1 + xi) * (1 + eta) * ( xi + eta - 1); % Shape function 3
+        0.25 * (1 - xi) * (1 + eta) * (-xi + eta - 1); % Shape function 4
+        0.5 * (1 - xi^2) * (1 - eta); % Shape function 5 (mid-side node on the bottom edge)
+        0.5 * (1 + xi) * (1 - eta^2); % Shape function 6 (mid-side node on the right edge)
+        0.5 * (1 - xi^2) * (1 + eta); % Shape function 7 (mid-side node on the top edge)
+        0.5 * (1 - xi) * (1 - eta^2); % Shape function 8 (mid-side node on the left edge)
+    ];
+    shape_gradients = [
+        diff(shape_functions, xi)';
+        diff(shape_functions, eta)'
+    ];
+end
+
+function [K, F] = assemble_system(nodes, elements, shape_functions, shape_gradients)
+    num_nodes = size(nodes, 1);
+    num_elements = size(elements, 1);
+    K = sparse(num_nodes, num_nodes);
+    F = zeros(num_nodes, 1);
+
+    for e = 1:num_elements
+        element_nodes = elements(e, :);
+        coords = nodes(element_nodes, :);
+
+        % Compute element stiffness matrix and force vector
+        [Ke, Fe] = element_stiffness_force(coords, shape_functions, shape_gradients);
+
+        % Assemble into global stiffness matrix and force vector
+        for i = 1:length(element_nodes)
+            for j = 1:length(element_nodes)
+                K(element_nodes(i), element_nodes(j)) = K(element_nodes(i), element_nodes(j)) + Ke(i, j);
+            end
+            F(element_nodes(i)) = F(element_nodes(i)) + Fe(i);
+        end
+    end
+end
+
+function [Ke, Fe] = element_stiffness_force(coords, shape_functions, shape_gradients)
+    % Numerical integration (Gauss quadrature)
+    gauss_points = [-1/sqrt(3), 1/sqrt(3)];
+    gauss_weights = [1, 1];
+    num_nodes_per_element = size(coords, 1);
+    Ke = zeros(num_nodes_per_element, num_nodes_per_element);
+    Fe = zeros(num_nodes_per_element, 1);
+
+    for i = 1:length(gauss_points)
+        for j = 1:length(gauss_points)
+            xi = gauss_points(i);
+            eta = gauss_points(j);
+            weight = gauss_weights(i) * gauss_weights(j);
+
+            % Evaluate shape functions and gradients at Gauss points
+            N = double(subs(shape_functions, {'xi', 'eta'}, {xi, eta}));
+            dN_dxi = double(subs(shape_gradients(1, :), {'xi', 'eta'}, {xi, eta}));
+            dN_deta = double(subs(shape_gradients(2, :), {'xi', 'eta'}, {xi, eta}));
+
+            % Jacobian matrix and determinant
+            J = [dN_dxi; dN_deta] * coords;
+            detJ = det(J);
+            invJ = inv(J);
+
+            % Gradient of shape functions in physical coordinates
+            dN_dx = invJ * [dN_dxi; dN_deta];
+
+            % Element stiffness matrix
+            Ke = Ke + (dN_dx' * dN_dx) * detJ * weight;
+
+            % Element force vector
+            Fe = Fe + N * detJ * weight;
+        end
+    end
+end
+
+function [K, F] = apply_boundary_conditions_circle(K, F, nodes, R)
+    tol = 1e-5;
+    boundary_nodes = find(sqrt(nodes(:, 1).^2 + nodes(:, 2).^2) > R - tol);
+    for i = 1:length(boundary_nodes)
+        node = boundary_nodes(i);
+        K(node, :) = 0;
+        K(node, node) = 1;
+        F(node) = 0;
+    end
+end
+
+function plot_solution_circle(nodes, elements, U)
+    % Create a grid of the solution for plotting
+    [X, Y] = meshgrid(linspace(-1, 1, 100), linspace(-1, 1, 100));
+    Z = griddata(nodes(:, 1), nodes(:, 2), U, X, Y);
+    
+    % Mask the outside of the circle
+    mask = sqrt(X.^2 + Y.^2) <= 1;
+    Z(~mask) = NaN;
+    
+    % Plot the solution
+    surf(X, Y, Z);
+    title('Solution of the Poisson equation on a circular domain using 8-node serendipity elements');
+    xlabel('x');
+    ylabel('y');
+    zlabel('u');
+    view(2);  % View from the top
+    colorbar;
+end
